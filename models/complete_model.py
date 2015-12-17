@@ -22,9 +22,6 @@ class MultiModal(object):
         self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
         self._targets = tf.placeholder(tf.int32, [batch_size, num_steps])
 
-        # Slightly better results can be obtained with forget gate biases
-        # initialized to 1 but the hyperparameters of the model would need to be
-        # different than reported in the paper.
         lstm_cell = rnn_cell.BasicLSTMCell(size, forget_bias=1.0)
         if is_training and config.keep_prob < 1:
             lstm_cell = rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=config.keep_prob)
@@ -42,11 +39,11 @@ class MultiModal(object):
         inputs = [tf.squeeze(input_, [1]) for input_ in tf.split(1, num_steps, inputs)]
         outputs, states = rnn.rnn(cell, inputs, initial_state=self._initial_state)
 
-        image_features = self.alexnet.layers['fc7']
-        image_features_size = image_features.get_shape().num_elements() / batch_size
+        image_features = self.alexnet.layers['fc8']
+        image_features_size = int(image_features.get_shape().num_elements() / batch_size)
 
-        outputs = [tf.concat(1, [i, o, image_features]) for i, o in zip(inputs, outputs)]
-        new_size = int(2 * size + image_features_size)
+        outputs = [tf.concat(1, [o, image_features]) for o in outputs]
+        new_size = size + image_features_size
 
         output = tf.reshape(tf.concat(1, outputs), [-1, new_size])
         self.outputs = output
@@ -61,6 +58,7 @@ class MultiModal(object):
         self._final_state = states[-1]
 
         if not is_training:
+            self._train_op = tf.no_op()
             return
 
         self._lr = tf.Variable(0.0, trainable=False)

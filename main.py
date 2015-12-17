@@ -10,15 +10,14 @@ from models.complete_model import MultiModal
 image_size = 227
 
 class Configs(object):
-    init_scale = 0.1
     learning_rate = 0.25
-    max_grad_norm = 5
+    max_grad_norm = 3
     num_layers = 2
     num_steps = 20
     hidden_size = 200
     max_epoch = 4
     max_max_epoch = 13
-    keep_prob = 0.5
+    keep_prob = 0.8
     lr_decay = 0.5
     batch_size = 20
     vocab_size = 10000
@@ -26,18 +25,17 @@ class Configs(object):
 
 def main(rnn_config, eval_config):
     print('Loading data')
-    data, vocab = reader.flickr_raw_data(1000, rnn_config.num_steps, image_size)
+    data, vocab = reader.flickr_raw_data(15000, rnn_config.num_steps, image_size)
     test_image = np.zeros((eval_config.batch_size, image_size, image_size, 3))
     test_image[0, :, :] = plt.imread('data/test_image.jpg')/255.
 
     rnn_config.vocab_size = len(vocab)
     eval_config.vocab_size = len(vocab)
-    print('Vocab size of: ', rnn_config.vocab_size)
+    print('Vocab size of: {}'.format(rnn_config.vocab_size))
 
     with tf.Graph().as_default(), tf.Session() as sess:
         print('Creating rnn model')
         initializer = tf.uniform_unit_scaling_initializer()
-        # random_uniform_initializer(-rnn_config.init_scale,rnn_config.init_scale)
 
         with tf.variable_scope("model", reuse=None, initializer=initializer):
             train_image_tensor = tf.placeholder(np.float32, (rnn_config.batch_size, image_size, image_size, 3), 'input_image')

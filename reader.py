@@ -12,11 +12,6 @@ import skimage.transform
 from tensorflow.python.platform import gfile
 
 
-def _read_words(filename):
-    with gfile.FastGFile(filename, "r") as f:
-        return f.read().replace("\n", " <eos>").replace('.', '<eos>').translate(None, string.punctuation).split()
-
-
 def _build_vocab(data):
     # data = _read_words(filename)
 
@@ -36,7 +31,6 @@ def _file_to_word_ids(data, word_to_id):
 
 def flickr_raw_data(N, num_steps, image_size):
     all_text = []
-    max_len = 0
     with gfile.GFile('data/Flickr8k_text/Flickr8k.lemma.token.txt', 'r') as f:
         dataset = []
         images = {}
@@ -48,11 +42,9 @@ def flickr_raw_data(N, num_steps, image_size):
                 print('Loading dataset : {}'.format(complete))
             image_filename, sentence = line.split('\t')
             image_filename, number = image_filename.split('#')
-            sentence = ['<BOS>'] + sentence.replace('\n', ' <eos>').lower().split()
-            if len(sentence) > max_len:
-                max_len = len(sentence)
-                print(max_len)
-            sentence.extend(['<fill>'] * (num_steps - len(sentence)))
+            sentence = '<BOS> ' + sentence.lower().replace('\n', '<eos>').translate(None, string.punctuation)
+            sentence = sentence.split()
+            sentence.extend(['<PAD>'] * (num_steps - len(sentence)))
             if int(number) == 0:
                 image_path = os.path.join('data', 'Flicker8k_Dataset', image_filename)
                 try:
