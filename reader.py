@@ -4,7 +4,6 @@ from __future__ import print_function
 
 import collections
 import os
-import string
 
 import numpy as np
 import skimage.data
@@ -42,7 +41,7 @@ def flickr_raw_data(N, num_steps, image_size):
                 print('Loading dataset : {}'.format(complete))
             image_filename, sentence = line.split('\t')
             image_filename, number = image_filename.split('#')
-            sentence = '<BOS> ' + sentence.lower().replace('\n', '<eos>').translate(None, string.punctuation)
+            sentence = '<BOS> ' + sentence.lower().replace('\n', '').translate(None, '.,') + ' <EOS>'
             sentence = sentence.split()
             sentence.extend(['<PAD>'] * (num_steps - len(sentence)))
             if int(number) == 0:

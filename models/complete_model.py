@@ -22,7 +22,7 @@ class MultiModal(object):
         self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
         self._targets = tf.placeholder(tf.int32, [batch_size, num_steps])
 
-        lstm_cell = rnn_cell.BasicLSTMCell(size, forget_bias=1.0)
+        lstm_cell = rnn_cell.LSTMCell(size, size, use_peepholes=True)
         if is_training and config.keep_prob < 1:
             lstm_cell = rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=config.keep_prob)
         cell = rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers)
@@ -56,6 +56,7 @@ class MultiModal(object):
         self.logits = logits
         self._cost = cost = tf.reduce_sum(loss) * (1.0 / batch_size)
         self._final_state = states[-1]
+        self.probs = tf.nn.softmax(logits)
 
         if not is_training:
             self._train_op = tf.no_op()
@@ -101,5 +102,3 @@ class MultiModal(object):
 
     def load_alexnet(self, path, session):
         self.alexnet.load(path, session)
-
-

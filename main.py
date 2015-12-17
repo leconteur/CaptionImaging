@@ -13,7 +13,7 @@ class Configs(object):
     learning_rate = 0.25
     max_grad_norm = 3
     num_layers = 2
-    num_steps = 20
+    num_steps = 10
     hidden_size = 200
     max_epoch = 4
     max_max_epoch = 13
@@ -22,10 +22,9 @@ class Configs(object):
     batch_size = 20
     vocab_size = 10000
 
-
 def main(rnn_config, eval_config):
     print('Loading data')
-    data, vocab = reader.flickr_raw_data(15000, rnn_config.num_steps, image_size)
+    data, vocab = reader.flickr_raw_data(10000, rnn_config.num_steps, image_size)
     test_image = np.zeros((eval_config.batch_size, image_size, image_size, 3))
     test_image[0, :, :] = plt.imread('data/test_image.jpg')/255.
 
@@ -98,20 +97,22 @@ def sample(sess, vocab, config, model, image, prime=('The ',)):
     def weighted_pick(weights):
         t = np.cumsum(weights)
         s = np.sum(weights)
-        i = int(np.searchsorted(t, np.random.rand(1) * s))
+        p = np.random.rand(1) * s
+        i = int(np.searchsorted(t, p))
         if i == len(t):
             return i - 1
         return i
 
     ret = ' '.join(prime) + ' '
     char = prime[-1]
+    x = np.zeros((config.batch_size, config.num_steps))
     for n in xrange(config.num_steps):
-        x = np.zeros((config.batch_size, config.num_steps))
-        x[:, 0] = vocab[char]
+        #x = np.zeros((config.batch_size, config.num_steps))
+        x[:, n] = vocab[char]
         feed = {model.input_data: x, model.initial_state: state, model.image_input: image}
-        [probs, state] = sess.run([model.logits, model.final_state], feed)
-        p = probs[0]
+        [probs, state] = sess.run([model.probs, model.final_state], feed)
         # sample = int(np.random.choice(len(p), p=p))
+        p = probs[n]
         sample = weighted_pick(p)
         try:
             pred = chars[sample]
