@@ -8,6 +8,7 @@ from tensorflow.models.rnn import rnn_cell
 from tensorflow.models.rnn import seq2seq
 
 from models import alexnet
+import numpy as np
 
 
 class MultiModal(object):
@@ -16,7 +17,7 @@ class MultiModal(object):
         self.num_steps = num_steps = config.num_steps
         size = config.hidden_size
         vocab_size = config.vocab_size
-        self.alexnet = alexnet.AlexNet({'data': image_tensor})
+        self.alexnet = alexnet.AlexNet({'data': image_tensor}, trainable=False)
         self.image_input = image_tensor
 
         self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
@@ -39,17 +40,17 @@ class MultiModal(object):
         inputs = [tf.squeeze(input_, [1]) for input_ in tf.split(1, num_steps, inputs)]
         outputs, states = rnn.rnn(cell, inputs, initial_state=self._initial_state)
 
-        image_features = self.alexnet.layers['fc8']
+        image_features = self.alexnet.layers['fc7']
         image_features_size = int(image_features.get_shape().num_elements() / batch_size)
 
-        outputs = [tf.concat(1, [o, image_features]) for o in outputs]
-        new_size = size + image_features_size
+        outputs = [tf.concat(1, [o, image_features, i]) for o, i in zip(outputs, inputs)]
+        new_size = size + image_features_size + size    # The size of input and output is size
 
         output = tf.reshape(tf.concat(1, outputs), [-1, new_size])
         self.outputs = output
-        logits = tf.nn.xw_plus_b(
-            output, tf.get_variable("softmax_w", [new_size, vocab_size]),
-            tf.get_variable("softmax_b", [vocab_size]))
+        softmax_w = tf.get_variable("softmax_w", [new_size, vocab_size])
+        softmax_b = tf.get_variable("softmax_b", [vocab_size])
+        logits = tf.nn.xw_plus_b(output, softmax_w, softmax_b)
         loss = seq2seq.sequence_loss_by_example([logits], [
             tf.reshape(self._targets, [-1])
         ], [tf.ones([batch_size * num_steps])], vocab_size)
@@ -64,10 +65,48 @@ class MultiModal(object):
 
         self._lr = tf.Variable(0.0, trainable=False)
         tvars = tf.trainable_variables()
-        grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars),
-                                          config.max_grad_norm)
-        optimizer = tf.train.GradientDescentOptimizer(self.lr)
+        grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars), config.max_grad_norm)
+        #optimizer = tf.train.GradientDescentOptimizer(self.lr)
+        optimizer = tf.train.AdamOptimizer(self.lr)
         self._train_op = optimizer.apply_gradients(zip(grads, tvars))
+
+        tf.scalar_summary('perplexity', cost)
+        tf.histogram_summary('loss', loss)
+        tf.histogram_summary('probs', self.probs)
+
+    def sample(self, sess, vocab, config, image, prime=('The ', )):
+        chars = {v: k for k, v in vocab.items()}
+        state = self.initial_state.eval()
+        #for char in prime[:-1]:
+        #    x = np.zeros((config.batch_size, config.num_steps))
+        #    x[0, 0] = vocab[char]
+        #    feed = {self.input_data: x, self.initial_state: state}
+        #    [state] = sess.run([self.final_state], feed)
+
+        ret = ' '.join(prime) + ' '
+        char = prime[-1]
+        x = np.zeros((config.batch_size, config.num_steps))
+        for n in xrange(config.num_steps):
+            # x = np.zeros((config.batch_size, config.num_steps))
+            x[:, n] = vocab[char]
+            feed = {self.input_data: x, self.initial_state: state, self.image_input: image}
+            [probs, state] = sess.run([self.probs, self.final_state], feed)
+            # sample = int(np.random.choice(len(p), p=p))
+            p = probs[n]
+            sample = weighted_pick(p)
+            #sample = np.argmax(p)
+            try:
+                pred = chars[sample]
+            except KeyError:
+                print('Could not find key {}'.format(sample))
+                pred = '<EOS>'
+            # pred = chars.get(sample, '<eos>')
+            if pred == '<EOS>':
+                ret += '. '
+            else:
+                ret += pred + ' '
+            char = pred
+        return ret
 
     def assign_lr(self, session, lr_value):
         session.run(tf.assign(self.lr, lr_value))
@@ -102,3 +141,13 @@ class MultiModal(object):
 
     def load_alexnet(self, path, session):
         self.alexnet.load(path, session)
+
+
+def weighted_pick(weights):
+    t = np.cumsum(weights)
+    s = np.sum(weights)
+    p = np.random.rand(1) * s
+    i = int(np.searchsorted(t, p))
+    if i == len(t):
+        return i - 1
+    return i
