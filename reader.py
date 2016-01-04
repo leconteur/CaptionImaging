@@ -40,11 +40,11 @@ def flickr_raw_data(N, num_steps, image_size):
         valid = []
         images = {}
         for i, line in enumerate(f):
-            if 0 < N < len(train):
+            if 0 < N <= len(train):
                 break
             if i % 500 == 0:
-                complete = i / N if N > 0 else i
-                print('Loading dataset : {:%}'.format(complete))
+                complete = len(train) / N if N > 0 else i
+                print('Loading dataset : {:.1%}'.format(complete))
             image_filename, sentence = line.split('\t')
             image_filename, number = image_filename.split('#')
             sentence = sentence.lower().replace('\n', '').translate(None, '.,')

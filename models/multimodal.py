@@ -12,18 +12,20 @@ import numpy as np
 
 
 class MultiModal(object):
-    def __init__(self, is_training, image_tensor, config):
+    def __init__(self, is_training, image_tensor, config, global_step_tensor):
         self.batch_size = batch_size = config.batch_size
         self.num_steps = num_steps = config.num_steps
         size = config.hidden_size
         vocab_size = config.vocab_size
+
+
         self.alexnet = alexnet.AlexNet({'data': image_tensor}, trainable=False)
         self.image_input = image_tensor
 
         self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
         self._targets = tf.placeholder(tf.int32, [batch_size, num_steps])
 
-        lstm_cell = rnn_cell.LSTMCell(size, size, use_peepholes=True)
+        lstm_cell = rnn_cell.LSTMCell(size, size, use_peepholes=True, cell_clip=10.)
         if is_training and config.keep_prob < 1:
             lstm_cell = rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=config.keep_prob)
         cell = rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers)
@@ -40,7 +42,7 @@ class MultiModal(object):
         inputs = [tf.squeeze(input_, [1]) for input_ in tf.split(1, num_steps, inputs)]
         outputs, states = rnn.rnn(cell, inputs, initial_state=self._initial_state)
 
-        image_features = self.alexnet.layers['fc7']
+        image_features = self.alexnet.layers['fc8']
         image_features_size = int(image_features.get_shape().num_elements() / batch_size)
 
         outputs = [tf.concat(1, [o, image_features, i]) for o, i in zip(outputs, inputs)]
@@ -68,13 +70,13 @@ class MultiModal(object):
         grads, _ = tf.clip_by_global_norm(tf.gradients(cost, tvars), config.max_grad_norm)
         #optimizer = tf.train.GradientDescentOptimizer(self.lr)
         optimizer = tf.train.AdamOptimizer(self.lr)
-        self._train_op = optimizer.apply_gradients(zip(grads, tvars))
+        self._train_op = optimizer.apply_gradients(zip(grads, tvars), global_step=global_step_tensor)
 
         tf.scalar_summary('perplexity', cost)
         tf.histogram_summary('loss', loss)
         tf.histogram_summary('probs', self.probs)
 
-    def sample(self, sess, vocab, config, image, prime=('The ', )):
+    def sample(self, sess, vocab, config, image, prime=('<BOS>', )):
         chars = {v: k for k, v in vocab.items()}
         state = self.initial_state.eval()
         #for char in prime[:-1]:
