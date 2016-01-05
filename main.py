@@ -45,65 +45,77 @@ def main(rnn_config, eval_config):
 
 
     with tf.Graph().as_default(), tf.Session() as sess:
-        global_step_tensor = tf.Variable(0, trainable=False, name='global_step')
-        print('Creating rnn model')
-        if flags.FLAGS.restore:
-            initializer = None
-        else:
-            initializer = tf.uniform_unit_scaling_initializer()
+        global_step_tensor, m, merged, mtest, mvalid, saver, writer = init_models(eval_config, rnn_config, sess)
 
-        with tf.variable_scope("model", reuse=None, initializer=initializer):
-            train_image_tensor = tf.placeholder(np.float32, (rnn_config.batch_size, rnn_config.image_size,
-                                                             rnn_config.image_size, 3), 'input_image')
-            m = MultiModal(is_training=True, config=rnn_config, image_tensor=train_image_tensor, global_step_tensor=global_step_tensor)
-            m.load_alexnet('models/alexnet_weights.npy', sess)
-            variables_to_save = tf.trainable_variables() + [global_step_tensor]
+        train_model(eval_config, global_step_tensor, m, merged, mtest, mvalid, saver, sess, test_image, train_data,
+                    valid_data, vocab, writer)
 
-        with tf.variable_scope("model", reuse=True, initializer=initializer):
-            mvalid = MultiModal(is_training=False, config=rnn_config,
-                                image_tensor=train_image_tensor, global_step_tensor=global_step_tensor)
-            test_image_tensor = tf.placeholder(np.float32, (eval_config.batch_size, eval_config.image_size,
-                                                            eval_config.image_size, 3), 'test_input_image')
-            mtest = MultiModal(is_training=False,
-                               config=eval_config,
-                               image_tensor=test_image_tensor, global_step_tensor=global_step_tensor)
+        create_image(mtest)
 
-        merged = tf.merge_all_summaries()
-        writer = tf.train.SummaryWriter("logs/")
+def create_image(mtest):
+    pass
 
-        saver = tf.train.Saver(variables_to_save)
-        if flags.FLAGS.restore:
-            tf.initialize_all_variables().run()
-            checkpoint = tf.train.latest_checkpoint(os.path.abspath('ckpts/'))
-            print('Restoring from checkpoint: {}'.format(checkpoint))
-            saver.restore(sess, checkpoint)
-        else:
-            tf.initialize_all_variables().run()
 
-        print('Getting the global step : {}'.format(tf.train.global_step(sess, global_step_tensor)))
-        #for epoch in range(config.max_max_epoch):
+def train_model(eval_config, global_step_tensor, m, merged, mtest, mvalid, saver, sess, test_image, train_data,
+                valid_data, vocab, writer):
+    print('Getting the global step : {}'.format(tf.train.global_step(sess, global_step_tensor)))
+    epoch = get_epoch(global_step_tensor, sess, flags.FLAGS.N, config.batch_size)
+    while epoch <= config.max_max_epoch:
+        lr_decay = config.lr_decay ** max(epoch - config.max_epoch, 0.0)
+        m.assign_lr(sess, config.learning_rate * lr_decay)
+        print('Running epoch {} with learning rate {}'.format(epoch,
+                                                              config.learning_rate * lr_decay))
+        train_loss = run_epoch(sess, train_data, m.train_op, config, m, mtest, test_image,
+                               vocab, global_step_tensor,
+                               summary=merged,
+                               summary_writer=writer,
+                               verbose=True)
+        print('Training Loss : {:.3f}'.format(train_loss))
+        valid_loss = run_epoch(sess, valid_data, mvalid.train_op, config, mvalid, None,
+                               test_image, vocab, global_step_tensor,
+                               verbose=False)
+        print('Valid Loss: {:.3f}'.format(valid_loss))
+
+        print('Sampling rnn')
+        s = mtest.sample(sess, vocab, eval_config, test_image, ['<BOS>'])
+        print(s)
+        saver.save(sess, os.path.abspath('ckpts/captionning'), global_step_tensor)
         epoch = get_epoch(global_step_tensor, sess, flags.FLAGS.N, config.batch_size)
-        while epoch <= config.max_max_epoch:
-            lr_decay = config.lr_decay ** max(epoch - config.max_epoch, 0.0)
-            m.assign_lr(sess, config.learning_rate * lr_decay)
-            print('Running epoch {} with learning rate {}'.format(epoch,
-                                                                  config.learning_rate * lr_decay))
-            train_loss = run_epoch(sess, train_data, m.train_op, config, m, mtest, test_image,
-                                   vocab, global_step_tensor,
-                                   summary=merged,
-                                   summary_writer=writer,
-                                   verbose=True)
-            print('Training Loss : {:.3f}'.format(train_loss))
-            valid_loss = run_epoch(sess, valid_data, mvalid.train_op, config, mvalid, None,
-                                   test_image, vocab, global_step_tensor,
-                                   verbose=False)
-            print('Valid Loss: {:.3f}'.format(valid_loss))
 
-            print('Sampling rnn')
-            s = mtest.sample(sess, vocab, eval_config, test_image, ['<BOS>'])
-            print(s)
-            saver.save(sess, os.path.abspath('ckpts/captionning'), global_step_tensor)
-            epoch = get_epoch(global_step_tensor, sess, flags.FLAGS.N, config.batch_size)
+
+def init_models(eval_config, rnn_config, sess):
+    global_step_tensor = tf.Variable(0, trainable=False, name='global_step')
+    print('Creating rnn model')
+    if flags.FLAGS.restore:
+        initializer = None
+    else:
+        initializer = tf.uniform_unit_scaling_initializer()
+    with tf.variable_scope("model", reuse=None, initializer=initializer):
+        train_image_tensor = tf.placeholder(np.float32, (rnn_config.batch_size, rnn_config.image_size,
+                                                         rnn_config.image_size, 3), 'input_image')
+        m = MultiModal(is_training=True, config=rnn_config, image_tensor=train_image_tensor,
+                       global_step_tensor=global_step_tensor)
+        m.load_alexnet('models/alexnet_weights.npy', sess)
+        variables_to_save = tf.trainable_variables() + [global_step_tensor]
+    with tf.variable_scope("model", reuse=True, initializer=initializer):
+        mvalid = MultiModal(is_training=False, config=rnn_config,
+                            image_tensor=train_image_tensor, global_step_tensor=global_step_tensor)
+        test_image_tensor = tf.placeholder(np.float32, (eval_config.batch_size, eval_config.image_size,
+                                                        eval_config.image_size, 3), 'test_input_image')
+        mtest = MultiModal(is_training=False,
+                           config=eval_config,
+                           image_tensor=test_image_tensor, global_step_tensor=global_step_tensor)
+    merged = tf.merge_all_summaries()
+    writer = tf.train.SummaryWriter("logs/")
+    saver = tf.train.Saver(variables_to_save)
+    if flags.FLAGS.restore:
+        tf.initialize_all_variables().run()
+        checkpoint = tf.train.latest_checkpoint(os.path.abspath('ckpts/'))
+        print('Restoring from checkpoint: {}'.format(checkpoint))
+        saver.restore(sess, checkpoint)
+    else:
+        tf.initialize_all_variables().run()
+    return global_step_tensor, m, merged, mtest, mvalid, saver, writer
 
 
 def get_epoch(global_step_tensor, sess, N, batch_size):
@@ -144,9 +156,9 @@ def run_epoch(session, data, eval_op, config, train_model, test_model, test_imag
             completed = step * 1.0 / epoch_size
             perplexity = np.exp(costs / iters)
             wps = iters * config.batch_size / (time.time() - start_time)
-            print("{0} perplexity: {1:.3f} speed: {2:.0f} wps".format(completed, perplexity, wps))
+            print("{0:.2%} perplexity: {1:.3f} speed: {2:.0f} wps".format(completed, perplexity, wps))
             summary_writer.add_summary(summary_result, global_step=tf.train.global_step(session, global_step))
-        if verbose and step % 50 == 0 and step != 0:
+        if verbose and step % 25 == 0 and step != 0:
             print(test_model.sample(session, vocab, eval_config, test_image, prime=['<BOS>']))
 
     return np.exp(costs / iters)

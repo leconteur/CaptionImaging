@@ -95,8 +95,8 @@ class MultiModal(object):
             [probs, state] = sess.run([self.probs, self.final_state], feed)
             # sample = int(np.random.choice(len(p), p=p))
             p = probs[n]
-            sample = weighted_pick(p)
-            #sample = np.argmax(p)
+            #sample = weighted_pick(p)
+            sample = np.argmax(p)
             try:
                 pred = chars[sample]
             except KeyError:
