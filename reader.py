@@ -18,6 +18,7 @@ def _build_vocab(data):
     words, _ = list(zip(*count_pairs))
     word_to_id = dict(zip(words, range(len(words))))
 
+    print(word_to_id)
     return word_to_id
 
 
@@ -54,7 +55,7 @@ def flickr_raw_data(N, num_steps, image_size):
             if int(number) == 0:
                 image_path = os.path.join('data', 'Flicker8k_Dataset', image_filename)
                 try:
-                    im = skimage.data.imread(image_path) / 255.
+                    im = skimage.data.imread(image_path).astype(np.float32) / 255.
                     im = skimage.transform.rescale(im, image_size / 500.0)
                     image = np.zeros((image_size, image_size, 3))
                     image[:im.shape[0], :im.shape[1], :] = im
@@ -86,9 +87,9 @@ def flickr_iterator(data, batch_size, num_steps, imshape):
     data_len = len(data['dataset'])
     np.random.shuffle(data['dataset'])
     for i in range(0, data_len - batch_size, batch_size):
-        sentences = np.zeros((batch_size, num_steps))
+        sentences = np.zeros((batch_size, num_steps), dtype=np.int32)
         images = np.zeros((batch_size, imshape[0], imshape[1], imshape[2]))
-        targets = np.zeros((batch_size, num_steps))
+        targets = np.zeros((batch_size, num_steps), dtype=np.int32)
         for j, d in enumerate(data['dataset'][i:i + batch_size]):
             sentences[j, :] = d[1][:-1]
             images[j] = data['images'][d[0]]

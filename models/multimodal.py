@@ -10,6 +10,14 @@ from tensorflow.models.rnn import seq2seq
 from models import alexnet
 import numpy as np
 
+def weighted_pick(weights):
+    t = np.cumsum(weights)
+    s = np.sum(weights)
+    p = np.random.rand(1) * s
+    i = int(np.searchsorted(t, p))
+    if i == len(t):
+        return i - 1
+    return i
 
 class MultiModal(object):
     def __init__(self, is_training, image_tensor, config, global_step_tensor):
@@ -18,14 +26,14 @@ class MultiModal(object):
         size = config.hidden_size
         vocab_size = config.vocab_size
 
-
+        image_tensor = tf.nn.local_response_normalization(image_tensor)
         self.alexnet = alexnet.AlexNet({'data': image_tensor}, trainable=False)
         self.image_input = image_tensor
 
         self._input_data = tf.placeholder(tf.int32, [batch_size, num_steps])
         self._targets = tf.placeholder(tf.int32, [batch_size, num_steps])
 
-        lstm_cell = rnn_cell.LSTMCell(size, size, use_peepholes=True, cell_clip=10.)
+        lstm_cell = rnn_cell.LSTMCell(size, size, use_peepholes=True, cell_clip=2.)
         if is_training and config.keep_prob < 1:
             lstm_cell = rnn_cell.DropoutWrapper(lstm_cell, output_keep_prob=config.keep_prob)
         cell = rnn_cell.MultiRNNCell([lstm_cell] * config.num_layers)
@@ -42,20 +50,30 @@ class MultiModal(object):
         inputs = [tf.squeeze(input_, [1]) for input_ in tf.split(1, num_steps, inputs)]
         outputs, states = rnn.rnn(cell, inputs, initial_state=self._initial_state)
 
-        image_features = self.alexnet.layers['fc8']
-        image_features_size = int(image_features.get_shape().num_elements() / batch_size)
+        fc8 = self.alexnet.layers['fc8']
+        print(fc8.get_shape())
+        with tf.name_scope('image_features'):
+            w = tf.get_variable('Weights', [1000, config.image_features_size])
+            b = tf.get_variable('Biases', [config.image_features_size])
+            image_features = tf.nn.sigmoid(tf.matmul(fc8, w) + b)
 
-        outputs = [tf.concat(1, [o, image_features, i]) for o, i in zip(outputs, inputs)]
-        new_size = size + image_features_size + size    # The size of input and output is size
+        image_features_size = config.image_features_size#int(image_features.get_shape().num_elements() / batch_size)
 
-        output = tf.reshape(tf.concat(1, outputs), [-1, new_size])
+        #outputs = [tf.concat(1, [o, image_features, i]) for o, i in zip(outputs, inputs)]
+        #new_size = size + image_features_size + size    # The size of input and output is size
+        outputs = [tf.concat(1, [o, image_features]) for o in outputs]
+        new_size = size + image_features_size
+
+        output = tf.concat(1, outputs)
+        output = tf.reshape(output, [-1, new_size])
         self.outputs = output
         softmax_w = tf.get_variable("softmax_w", [new_size, vocab_size])
         softmax_b = tf.get_variable("softmax_b", [vocab_size])
         logits = tf.nn.xw_plus_b(output, softmax_w, softmax_b)
+        weights = tf.ones([batch_size * num_steps])
         loss = seq2seq.sequence_loss_by_example([logits], [
             tf.reshape(self._targets, [-1])
-        ], [tf.ones([batch_size * num_steps])], vocab_size)
+        ], [weights], vocab_size)
         self.logits = logits
         self._cost = cost = tf.reduce_sum(loss) * (1.0 / batch_size)
         self._final_state = states[-1]
@@ -76,7 +94,7 @@ class MultiModal(object):
         tf.histogram_summary('loss', loss)
         tf.histogram_summary('probs', self.probs)
 
-    def sample(self, sess, vocab, config, image, prime=('<BOS>', )):
+    def sample(self, sess, vocab, config, image, prime=('<BOS>', ), sampling_func=weighted_pick):
         chars = {v: k for k, v in vocab.items()}
         state = self.initial_state.eval()
         #for char in prime[:-1]:
@@ -91,12 +109,14 @@ class MultiModal(object):
         for n in xrange(config.num_steps):
             # x = np.zeros((config.batch_size, config.num_steps))
             x[:, n] = vocab[char]
+            print(x.astype(int))
             feed = {self.input_data: x, self.initial_state: state, self.image_input: image}
-            [probs, state] = sess.run([self.probs, self.final_state], feed)
+            [probs, _] = sess.run([self.probs, self.final_state], feed)
             # sample = int(np.random.choice(len(p), p=p))
             p = probs[n]
-            #sample = weighted_pick(p)
-            sample = np.argmax(p)
+            sample = sampling_func(p)
+            print(max(p), p[sample])
+            #sample = np.argmax(p)
             try:
                 pred = chars[sample]
             except KeyError:
@@ -145,11 +165,4 @@ class MultiModal(object):
         self.alexnet.load(path, session)
 
 
-def weighted_pick(weights):
-    t = np.cumsum(weights)
-    s = np.sum(weights)
-    p = np.random.rand(1) * s
-    i = int(np.searchsorted(t, p))
-    if i == len(t):
-        return i - 1
-    return i
+
